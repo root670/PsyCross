@@ -128,10 +128,8 @@ int			g_enableSPUReverb = 0;
 int			g_ALEffectsSupported = 0;
 
 #if !defined(__EMSCRIPTEN__) && !defined(__SWITCH__)
-/* EFX function pointers — loaded at runtime on platforms where OpenAL Soft
- * does not export them as real symbols.  On Switch, libopenal.a provides
- * these as actual functions, so declaring them as global variables here
- * would produce duplicate-symbol link errors. */
+/* On Switch, libopenal.a exports these as real functions; declaring them as
+ * global variables here produces duplicate-symbol link errors. */
 LPALGENEFFECTS alGenEffects = NULL;
 LPALDELETEEFFECTS alDeleteEffects = NULL;
 LPALEFFECTI alEffecti = NULL;
