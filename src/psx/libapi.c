@@ -1002,11 +1002,13 @@ int write(int handle, void* buf, int bytes)
 	return bytes;
 }
 
+#ifndef __SWITCH__
 int ioctl(int unk00, int unk01, int unk02)
 {
 	(void)unk00; (void)unk01; (void)unk02;
 	return 0;
 }
+#endif /* __SWITCH__ */
 
 /* ----- Directory enumeration ----- */
 

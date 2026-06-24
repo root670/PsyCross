@@ -127,8 +127,11 @@ ALuint		g_nAlReverbEffect = 0;
 int			g_enableSPUReverb = 0;
 int			g_ALEffectsSupported = 0;
 
-#ifndef __EMSCRIPTEN__
-
+#if !defined(__EMSCRIPTEN__) && !defined(__SWITCH__)
+/* EFX function pointers — loaded at runtime on platforms where OpenAL Soft
+ * does not export them as real symbols.  On Switch, libopenal.a provides
+ * these as actual functions, so declaring them as global variables here
+ * would produce duplicate-symbol link errors. */
 LPALGENEFFECTS alGenEffects = NULL;
 LPALDELETEEFFECTS alDeleteEffects = NULL;
 LPALEFFECTI alEffecti = NULL;
@@ -137,12 +140,14 @@ LPALGENAUXILIARYEFFECTSLOTS alGenAuxiliaryEffectSlots = NULL;
 LPALDELETEAUXILIARYEFFECTSLOTS alDeleteAuxiliaryEffectSlots = NULL;
 LPALAUXILIARYEFFECTSLOTI alAuxiliaryEffectSloti = NULL;
 
-#endif // __EMSCRIPTEN__
+#endif /* !__EMSCRIPTEN__ && !__SWITCH__ */
 
 static void InitOpenAlEffects()
 {
 	g_ALEffectsSupported = 0;
-#ifndef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || defined(__SWITCH__)
+	/* EFX reverb not initialised on Emscripten/Switch — audio still works. */
+#else
 	if (!alcIsExtensionPresent(g_ALCdevice, ALC_EXT_EFX_NAME))
 	{
 		eprintf("PSX SPU effects are NOT supported!\n");
@@ -184,7 +189,7 @@ static void InitOpenAlEffects()
 	eprintf("PSX SPU effects are supported and initialized\n");
 
 	alAuxiliaryEffectSloti(g_ALEffectSlots[g_currEffectSlotIdx], AL_EFFECTSLOT_EFFECT, g_nAlReverbEffect);
-#endif // __EMSCRIPTEN__
+#endif /* __EMSCRIPTEN__ || __SWITCH__ */
 }
 
 int PsyX_SPUAL_InitSound()

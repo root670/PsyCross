@@ -53,6 +53,9 @@ if(NINTENDO_SWITCH)
         "$ENV{DEVKITPRO}/portlibs/switch/include/SDL2"
         "$ENV{DEVKITPRO}/libnx/include"
     )
+    # AL_ALEXT_PROTOTYPES exposes EFX function declarations (alGenEffects, etc.)
+    # in efx.h so the compiler sees real function prototypes not just typedefs.
+    target_compile_definitions(psycross_static PRIVATE AL_ALEXT_PROTOTYPES)
     # Exclude glad.c — GLES headers come from portlibs/EGL, no GL loader needed
     get_target_property(_psycross_srcs psycross_static SOURCES)
     list(FILTER _psycross_srcs EXCLUDE REGEX "glad\\.c$")

@@ -32,7 +32,7 @@
 
 #include "PsyX/PsyX_render.h"
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || defined(__SWITCH__)
 int strcasecmp(const char* _l, const char* _r)
 {
 	const u_char* l = (u_char*)_l, * r = (u_char*)_r;

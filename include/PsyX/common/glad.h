@@ -20,6 +20,17 @@
 */
 
 
+#ifdef __SWITCH__
+/* On Switch, GLES3 functions are available directly via portlibs — no GLAD loader. */
+#ifndef __glad_h_
+#define __glad_h_
+#include <GLES3/gl3.h>
+#include <GLES3/gl3ext.h>
+#include <EGL/egl.h>
+#endif /* __glad_h_ */
+
+#else /* !__SWITCH__ */
+
 #ifndef __glad_h_
 #define __glad_h_
 
@@ -3535,4 +3546,5 @@ GLAPI int GLAD_GL_KHR_debug;
 }
 #endif
 
-#endif
+#endif /* __glad_h_ */
+#endif /* !__SWITCH__ */
