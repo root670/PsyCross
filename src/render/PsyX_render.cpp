@@ -122,6 +122,7 @@ TextureID g_offscreenRTTexture = -1;
 
 TextureID g_whiteTexture = -1;
 TextureID g_lastBoundTexture = -1;
+static int g_lastTexFormat = -1;
 
 int g_windowWidth = 0;
 int g_windowHeight = 0;
@@ -546,6 +547,7 @@ void GR_UpdateSwapIntervalState(int swapInterval)
 void GR_BeginScene()
 {
 	g_lastBoundTexture = 0;
+	g_lastTexFormat = -1;
 
 #if USE_OPENGL
 #ifdef RENDERER_OGLES
@@ -1457,6 +1459,31 @@ void GR_SetShader(const ShaderID shader)
 
 void GR_SetTexture(TextureID texture, TexFormat texFormat)
 {
+	if (g_dbg_texturelessMode)
+		texture = g_whiteTexture;
+
+	/* Same shader (format) AND same texture — nothing to do. */
+	if ((int)texFormat == g_lastTexFormat && texture == g_lastBoundTexture)
+		return;
+
+	/* Same shader (format) — skip all per-frame uniform re-uploads,
+	 * only rebind the texture if it changed. */
+	if ((int)texFormat == g_lastTexFormat)
+	{
+		if (texture != g_lastBoundTexture)
+		{
+#if USE_OPENGL
+			glBindTexture(GL_TEXTURE_2D, texture);
+			if (u_bilinearFilterLoc != -1)
+				glUniform1i(u_bilinearFilterLoc, g_cfg_bilinearFiltering && !g_PsxDitherSuppressed);
+#endif
+			g_lastBoundTexture = texture;
+		}
+		return;
+	}
+
+	g_lastTexFormat = (int)texFormat;
+
 	switch (texFormat)
 	{
 	case TF_4_BIT:
@@ -1559,10 +1586,6 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 			? ((float)g_windowWidth / 320.0f)
 			: 1.0f;
 		glUniform1f(u_pixelScaleLoc, pixelScale);
-	}
-
-	if (g_dbg_texturelessMode) {
-		texture = g_whiteTexture;
 	}
 
 	if (g_lastBoundTexture == texture) {
