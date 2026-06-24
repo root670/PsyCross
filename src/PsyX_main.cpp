@@ -220,6 +220,12 @@ int intrThreadMain(void* data)
 		 * g_SpuMutex (never nested under g_intrMutex), throttles on the
 		 * SDL_GetTicks ms delta, no-op unless `adsr 1`. */
 		PsyX_SPUAL_Update();
+
+		/* Yield the time slice so this thread doesn't pin a core at 100%.
+		 * SDL_Delay(0) on Switch calls svcSleepThread(0) — gives up the
+		 * current quantum without adding a fixed sleep, keeping rcnt2
+		 * timing accurate at 1.73ms. */
+		SDL_Delay(0);
 	}
 
 	return 0;
