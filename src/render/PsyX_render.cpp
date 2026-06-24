@@ -2313,10 +2313,22 @@ void GR_ReadVRAM(unsigned short* dst, int x, int y, int dst_w, int dst_h)
 
 void GR_UpdateVRAM()
 {
-	if (!vram_need_update)
+	static int s_vramUploads = 0, s_vramSkips = 0;
+	static u_int s_vramStatsLast = 0;
+	if (!vram_need_update) {
+		s_vramSkips++;
+		if (s_vramStatsLast != 0 && SDL_GetTicks() - s_vramStatsLast >= 5000) {
+			printf("[PERF/vram] uploads=%d/5s  skips=%d/5s\n", s_vramUploads, s_vramSkips);
+			fflush(stdout);
+			s_vramUploads = s_vramSkips = 0;
+			s_vramStatsLast = SDL_GetTicks();
+		}
 		return;
+	}
 
 	vram_need_update = 0;
+	s_vramUploads++;
+	if (s_vramStatsLast == 0) s_vramStatsLast = SDL_GetTicks();
 
 #if USE_OPENGL
 	g_vramTexture = g_vramTexturesDouble[g_vramTextureIdx];
