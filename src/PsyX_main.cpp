@@ -184,8 +184,16 @@ int intrThreadMain(void* data)
 	 * Target 7328 → fires at 4233600/7328 ≈ 577.8 Hz → ~1.73ms period */
 	const double rcnt2Period = 1.0 / 577.8;
 
+	/* Perf counters — printed every 5s to stdout */
+	u_int statsLastTick = SDL_GetTicks();
+	int statsIterations = 0;
+	int statsVbl        = 0;
+	int statsRcnt2      = 0;
+
 	while (!g_stopIntrThread)
 	{
+		statsIterations++;
+
 		// step counters
 		{
 			const double timestep = g_vmode == MODE_NTSC ? FIXED_TIME_STEP_NTSC : FIXED_TIME_STEP_PAL;
@@ -205,6 +213,7 @@ int intrThreadMain(void* data)
 				if (g_vblSemaphore)
 					SDL_SemPost(g_vblSemaphore);
 
+				statsVbl++;
 				Util_GetHPCTime(&g_vblTimer, 1);
 			}
 
@@ -217,25 +226,34 @@ int intrThreadMain(void* data)
 					SDL_LockMutex(g_intrMutex);
 					PsyX_PumpRCnt2Timer();
 					SDL_UnlockMutex(g_intrMutex);
+					statsRcnt2++;
 					Util_GetHPCTime(&rcnt2Timer, 1);
 				}
 			}
 		}
 
-		/* Advance SPU ADSR envelopes on the audio-timing thread, NOT from the
-		 * render thread (PsyX_EndScene) — that placement deadlocked. Takes only
-		 * g_SpuMutex (never nested under g_intrMutex), throttles on the
-		 * SDL_GetTicks ms delta, no-op unless `adsr 1`. */
 		PsyX_SPUAL_Update();
 
-		/* Sleep briefly so this thread doesn't pin a core at 100%.
-		 * rcnt2 fires every 1.73ms; sleeping 200μs keeps timing within ~6%.
-		 * SDL_Delay(1) would be 1ms minimum — too coarse for 1.73ms period. */
 #if defined(__SWITCH__)
-		svcSleepThread(200000LL); /* 200 microseconds in nanoseconds */
+		svcSleepThread(200000LL);
 #else
 		SDL_Delay(1);
 #endif
+
+		/* Dump perf stats every 5 seconds */
+		u_int now = SDL_GetTicks();
+		if (now - statsLastTick >= 5000)
+		{
+			float elapsed = (now - statsLastTick) / 1000.0f;
+			printf("[PERF/intr] %.1fs: iterations=%d (%.0f/s)  vbl=%d (%.1f/s, expect 60)  rcnt2=%d (%.1f/s, expect 578)\n",
+				elapsed,
+				statsIterations, statsIterations / elapsed,
+				statsVbl,   statsVbl   / elapsed,
+				statsRcnt2, statsRcnt2 / elapsed);
+			fflush(stdout);
+			statsIterations = statsVbl = statsRcnt2 = 0;
+			statsLastTick = now;
+		}
 	}
 
 	return 0;
@@ -1143,6 +1161,19 @@ void PsyX_WaitForTimestep(int count)
 	{
 		static int swapLastVbl = 0;
 
+		/* Perf: track how long we actually block and print every 5s */
+		static u_int waitStatsLast  = 0;
+		static double waitTotalMs   = 0.0;
+		static int waitCalls        = 0;
+		static double frameWorkMs   = 0.0;
+		static u_int lastEndTick    = 0;
+
+		u_int waitStart = SDL_GetTicks();
+
+		/* Time spent in game logic since last WaitForTimestep returned */
+		if (lastEndTick != 0)
+			frameWorkMs += (double)(waitStart - lastEndTick);
+
 		if (g_vblSemaphore)
 		{
 			/* Sleep until the interrupt thread signals each VBlank.
@@ -1164,6 +1195,28 @@ void PsyX_WaitForTimestep(int count)
 		}
 
 		swapLastVbl = PsyX_Sys_GetVBlankCount();
+
+		u_int waitEnd = SDL_GetTicks();
+		waitTotalMs += (double)(waitEnd - waitStart);
+		lastEndTick  = waitEnd;
+		waitCalls++;
+
+		if (waitStatsLast == 0) waitStatsLast = waitEnd;
+		if (waitEnd - waitStatsLast >= 5000)
+		{
+			float elapsed = (waitEnd - waitStatsLast) / 1000.0f;
+			printf("[PERF/wait] %.1fs: frames=%d (%.1f/s)  avgWaitMs=%.2f  avgWorkMs=%.2f  waitFrac=%.0f%%\n",
+				elapsed,
+				waitCalls, waitCalls / elapsed,
+				waitCalls > 0 ? waitTotalMs / waitCalls : 0.0,
+				waitCalls > 0 ? frameWorkMs / waitCalls : 0.0,
+				(waitTotalMs + frameWorkMs) > 0 ? 100.0 * waitTotalMs / (waitTotalMs + frameWorkMs) : 0.0);
+			fflush(stdout);
+			waitCalls    = 0;
+			waitTotalMs  = 0.0;
+			frameWorkMs  = 0.0;
+			waitStatsLast = waitEnd;
+		}
 	}
 }
 
