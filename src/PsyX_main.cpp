@@ -914,7 +914,14 @@ char begin_scene_flag = 0;
 
 char PsyX_BeginScene()
 {
+	static u_int bsStatsLast = 0;
+	static double bsPollMs = 0, bsGRBeginMs = 0;
+	static int bsCount = 0;
+
+	u_int bsT0 = SDL_GetTicks();
 	PsyX_Sys_DoPollEvent();
+	u_int bsT1 = SDL_GetTicks();
+	bsPollMs += bsT1 - bsT0;
 
 	if (begin_scene_flag)
 		return 0;
@@ -963,7 +970,22 @@ char PsyX_BeginScene()
 		GR_UpdateSwapIntervalState(swapInterval);
 	}
 
+	u_int bsT2 = SDL_GetTicks();
 	GR_BeginScene();
+	u_int bsT3 = SDL_GetTicks();
+	bsGRBeginMs += bsT3 - bsT2;
+	bsCount++;
+
+	if (bsStatsLast == 0) bsStatsLast = bsT0;
+	if (bsT3 - bsStatsLast >= 5000) {
+		float e = (bsT3 - bsStatsLast) / 1000.0f;
+		printf("[PERF/begin] %.1fs: frames=%d  avgPollMs=%.3f  avgGRBeginMs=%.3f\n",
+			e, bsCount,
+			bsCount > 0 ? bsPollMs    / bsCount : 0.0,
+			bsCount > 0 ? bsGRBeginMs / bsCount : 0.0);
+		fflush(stdout);
+		bsPollMs = bsGRBeginMs = 0; bsCount = 0; bsStatsLast = bsT3;
+	}
 
 	// Always clear the backbuffer at the start of every frame. The PSX
 	// behavior gates this on activeDrawEnv.isbg, but during state
