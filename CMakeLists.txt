@@ -46,30 +46,43 @@ if(NOT WIN32)
         PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
 endif()
 
-find_package(SDL2 REQUIRED)
-target_link_libraries(psycross_static ${SDL2_LIBRARIES})
-target_include_directories(psycross_static PRIVATE ${SDL2_INCLUDE_DIRS})
-
-find_package(OpenAL REQUIRED)
-# find_package(OpenAL) exposes different handles depending on how OpenAL was
-# found: the imported target OpenAL::OpenAL (openal-soft's CMake config, or
-# CMake's FindOpenAL in 3.x), a bare `OpenAL` target (some MSYS2 configs), or
-# just the OPENAL_LIBRARY / OPENAL_INCLUDE_DIR variables. Prefer the imported
-# target; fall back so this links on both MinGW and Linux.
-if(TARGET OpenAL::OpenAL)
-    target_link_libraries(psycross_static OpenAL::OpenAL)
-elseif(TARGET OpenAL)
-    target_link_libraries(psycross_static OpenAL)
+if(NINTENDO_SWITCH)
+    # SDL2 and OpenAL come from portlibs; pkg-config is handled by Switch.cmake toolchain
+    target_include_directories(psycross_static PRIVATE
+        "$ENV{DEVKITPRO}/portlibs/switch/include"
+        "$ENV{DEVKITPRO}/portlibs/switch/include/SDL2"
+        "$ENV{DEVKITPRO}/libnx/include"
+    )
+    # Exclude glad.c — GLES headers come from portlibs/EGL, no GL loader needed
+    get_target_property(_psycross_srcs psycross_static SOURCES)
+    list(FILTER _psycross_srcs EXCLUDE REGEX "glad\\.c$")
+    set_target_properties(psycross_static PROPERTIES SOURCES "${_psycross_srcs}")
 else()
-    target_link_libraries(psycross_static ${OPENAL_LIBRARY})
-    target_include_directories(psycross_static PRIVATE ${OPENAL_INCLUDE_DIR})
-endif()
-# Guard against an empty OpenAL_SOURCE_DIR (e.g. macOS Homebrew / system
-# framework, where find_package uses the imported target, not an in-tree build)
-# expanding to a bogus "/include" path.
-if(OpenAL_SOURCE_DIR)
-    target_include_directories(psycross_static PRIVATE ${OpenAL_BINARY_DIR} ${OpenAL_SOURCE_DIR}/include)
-endif()
-if(OPENAL_INCLUDE_DIR)
-    target_include_directories(psycross_static PRIVATE ${OPENAL_INCLUDE_DIR})
+    find_package(SDL2 REQUIRED)
+    target_link_libraries(psycross_static ${SDL2_LIBRARIES})
+    target_include_directories(psycross_static PRIVATE ${SDL2_INCLUDE_DIRS})
+
+    find_package(OpenAL REQUIRED)
+    # find_package(OpenAL) exposes different handles depending on how OpenAL was
+    # found: the imported target OpenAL::OpenAL (openal-soft's CMake config, or
+    # CMake's FindOpenAL in 3.x), a bare `OpenAL` target (some MSYS2 configs), or
+    # just the OPENAL_LIBRARY / OPENAL_INCLUDE_DIR variables. Prefer the imported
+    # target; fall back so this links on both MinGW and Linux.
+    if(TARGET OpenAL::OpenAL)
+        target_link_libraries(psycross_static OpenAL::OpenAL)
+    elseif(TARGET OpenAL)
+        target_link_libraries(psycross_static OpenAL)
+    else()
+        target_link_libraries(psycross_static ${OPENAL_LIBRARY})
+        target_include_directories(psycross_static PRIVATE ${OPENAL_INCLUDE_DIR})
+    endif()
+    # Guard against an empty OpenAL_SOURCE_DIR (e.g. macOS Homebrew / system
+    # framework, where find_package uses the imported target, not an in-tree build)
+    # expanding to a bogus "/include" path.
+    if(OpenAL_SOURCE_DIR)
+        target_include_directories(psycross_static PRIVATE ${OpenAL_BINARY_DIR} ${OpenAL_SOURCE_DIR}/include)
+    endif()
+    if(OPENAL_INCLUDE_DIR)
+        target_include_directories(psycross_static PRIVATE ${OPENAL_INCLUDE_DIR})
+    endif()
 endif()

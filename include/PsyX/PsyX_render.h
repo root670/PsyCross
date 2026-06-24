@@ -18,6 +18,9 @@
 #elif defined(__ANDROID__)
 #   define RENDERER_OGLES
 #   define OGLES_VERSION (3)
+#elif defined(__SWITCH__)
+#   define RENDERER_OGLES
+#   define OGLES_VERSION (3)
 #endif
 
 #if defined(RENDERER_OGL) || defined(RENDERER_OGLES)
