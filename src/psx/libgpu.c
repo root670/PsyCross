@@ -54,6 +54,7 @@ int ClearImage2(RECT16* rect, u_char r, u_char g, u_char b)
 
 int DrawSync(int mode)
 {
+	PerfGap_Mark(PSEG_OTAG_TO_SYNC);    /* gap: DrawOTag-exit → DrawSync-entry */
 	static u_int dsStatsLast = 0;
 	static double dsVRAMMs = 0, dsFBMs = 0, dsDrawMs = 0;
 	static int dsCalls = 0, dsVRAMSkip = 0;
@@ -75,6 +76,9 @@ int DrawSync(int mode)
 
 	if (drawsync_callback != NULL)
 		drawsync_callback();
+
+	PerfGap_Mark(PSEG_SYNC_INNER);
+	PerfGap_Mark(PSEG_SYNC_TO_END);     /* start timing gap to EndScene */
 
 	dsVRAMMs += t1 - t0;
 	dsFBMs   += t2 - t1;
@@ -481,11 +485,13 @@ void DrawOTagEnv(u_long* p, DRAWENV* env)
 
 void DrawOTag(u_long* p)
 {
+	PerfGap_Mark(PSEG_BEGIN_TO_OTAG);   /* gap: BeginScene-exit → DrawOTag-entry */
 	do
 	{
 		if (g_GPUDisabledState)
 		{
 			ClearSplits();
+			PerfGap_Mark(PSEG_OTAG_INNER);
 			return;
 		}
 
@@ -520,6 +526,8 @@ void DrawOTag(u_long* p)
 			fflush(stdout);
 			parseMs = drawMs = 0; parseCalls = 0; parseStatsLast = pt2;
 		}
+		PerfGap_Mark(PSEG_OTAG_INNER);
+		PerfGap_Mark(PSEG_OTAG_TO_SYNC); /* start timing gap to DrawSync */
 	} while (g_dbg_emulatorPaused);
 }
  

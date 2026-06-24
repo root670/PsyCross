@@ -108,6 +108,37 @@ extern void GR_UpdateSwapIntervalState(int swapInterval);
 int g_vmode = -1;
 int g_frameSkip = 0;
 
+/* PerfGap globals */
+unsigned int g_perfGapMs[PSEG_COUNT]    = {0};
+unsigned int g_perfGapCalls[PSEG_COUNT] = {0};
+unsigned int g_perfPrevTick             = 0;
+unsigned int g_perfStatsTick            = 0;
+
+static const char* s_segNames[PSEG_COUNT] = {
+	"vsync→begin", "begin→otag", "otag_inner",
+	"otag→sync",   "sync_inner", "sync→end",
+	"end_inner",   "end→vsync",  "vsync_inner"
+};
+
+void PerfGap_Print(void)
+{
+	unsigned int now = SDL_GetTicks();
+	if (g_perfStatsTick == 0) { g_perfStatsTick = now; return; }
+	if (now - g_perfStatsTick < 5000) return;
+
+	float e = (now - g_perfStatsTick) / 1000.0f;
+	printf("[PERF/gaps] %.1fs:", e);
+	for (int i = 0; i < PSEG_COUNT; i++) {
+		unsigned int c = g_perfGapCalls[i];
+		printf("  %s=%.2fms(%u)", s_segNames[i],
+			c > 0 ? (double)g_perfGapMs[i] / c : 0.0, c);
+		g_perfGapMs[i] = g_perfGapCalls[i] = 0;
+	}
+	printf("\n");
+	fflush(stdout);
+	g_perfStatsTick = now;
+}
+
 #ifdef __EMSCRIPTEN__
 
 int g_emIntrInterval = -1;
@@ -914,6 +945,8 @@ char begin_scene_flag = 0;
 
 char PsyX_BeginScene()
 {
+	PerfGap_Mark(PSEG_VSYNC_TO_BEGIN);  /* gap: WaitForTimestep-return → here */
+
 	static u_int bsStatsLast = 0;
 	static double bsPollMs = 0, bsGRBeginMs = 0;
 	static int bsCount = 0;
@@ -1017,6 +1050,7 @@ char PsyX_BeginScene()
 
 	PsyX_Log_Flush();
 
+	PerfGap_Mark(PSEG_BEGIN_TO_OTAG);   /* start timing: BeginScene-exit → next DrawOTag */
 	return 1;
 }
 
@@ -1030,6 +1064,7 @@ extern "C" void (*g_PsyX_PostCaptureHook)(void) = NULL;
 
 void PsyX_EndScene()
 {
+	PerfGap_Mark(PSEG_SYNC_TO_END);     /* gap: DrawSync-exit → EndScene-entry */
 	if (!begin_scene_flag)
 		return;
 
@@ -1066,6 +1101,7 @@ void PsyX_EndScene()
 
 	GR_SwapWindow();
 	u_int t4 = SDL_GetTicks();
+	PerfGap_Mark(PSEG_END_INNER);       /* time inside EndScene (incl. swap) */
 
 	esGREndMs   += t1 - t0;
 	esFBStoreMs += t2 - t1;
@@ -1224,6 +1260,7 @@ void PsyX_EnableSwapInterval(int enable)
 
 void PsyX_WaitForTimestep(int count)
 {
+	PerfGap_Mark(PSEG_END_TO_VSYNC);    /* gap: EndScene-exit → WaitForTimestep-entry */
 #if 0 // defined(RENDERER_OGL) || defined(RENDERER_OGLES)
 	glFinish(); // best time to complete GPU drawing
 #endif
@@ -1267,6 +1304,9 @@ void PsyX_WaitForTimestep(int count)
 		}
 
 		swapLastVbl = PsyX_Sys_GetVBlankCount();
+		PerfGap_Mark(PSEG_VSYNC_INNER); /* time inside WaitForTimestep (semaphore wait) */
+		PerfGap_Print();                /* print & reset every 5s */
+		PerfGap_Mark(PSEG_VSYNC_TO_BEGIN); /* start timing gap to next BeginScene */
 
 		u_int waitEnd = SDL_GetTicks();
 		waitTotalMs += (double)(waitEnd - waitStart);
