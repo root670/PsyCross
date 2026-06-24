@@ -103,6 +103,7 @@ int g_PreviousBlendMode = BM_NONE;
 int g_PreviousDepthMode = 0;
 int g_PreviousStencilMode = 0;
 int g_PreviousScissorState = 0;
+static int g_prevScissorX = -1, g_prevScissorY = -1, g_prevScissorW = -1, g_prevScissorH = -1;
 int g_PreviousOffscreenState = 0;
 RECT16 g_PreviousFramebuffer = { 0,0,0,0 };
 /* PC port: nonzero once GR_StoreFrameBuffer has stored at least one frame in
@@ -548,6 +549,7 @@ void GR_BeginScene()
 {
 	g_lastBoundTexture = 0;
 	g_lastTexFormat = -1;
+	g_prevScissorX = g_prevScissorY = g_prevScissorW = g_prevScissorH = -1;
 
 #if USE_OPENGL
 #ifdef RENDERER_OGLES
@@ -1429,7 +1431,11 @@ void GR_SetupClipMode(const RECT16* rect, int enable)
 	const float crw = clipRectW * (float)g_windowWidth;
 	const float crh = clipRectH * (float)g_windowHeight;
 
-	glScissor(crx, flipOffset - cry, crw, crh);
+	int icrx = (int)crx, icry = (int)(flipOffset - cry), icrw = (int)crw, icrh = (int)crh;
+	if (icrx != g_prevScissorX || icry != g_prevScissorY || icrw != g_prevScissorW || icrh != g_prevScissorH) {
+		glScissor(icrx, icry, icrw, icrh);
+		g_prevScissorX = icrx; g_prevScissorY = icry; g_prevScissorW = icrw; g_prevScissorH = icrh;
+	}
 #endif
 }
 
