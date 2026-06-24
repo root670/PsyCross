@@ -621,6 +621,30 @@ GTEShader g_gte_shader_8;
 GTEShader g_gte_shader_16;
 GTEShader g_gte_shader_32_rgba;
 
+/* Push the 5 frame-constant uniforms to every PSX shader program at the
+ * start of DrawAllSplits. Saves ~5 glUniform calls per format switch. */
+void GR_PushPerFrameUniforms()
+{
+#if USE_OPENGL
+	GTEShader* shaders[] = { &g_gte_shader_4, &g_gte_shader_8, &g_gte_shader_16, &g_gte_shader_32_rgba };
+	float pixelScale = g_windowWidth > 0 ? (float)g_windowWidth / 320.0f : 1.0f;
+	float ditherForce = (g_cfg_psxDither && !g_PsxDitherSuppressed) ? 1.0f : 0.0f;
+	float szMax = PGXP_GetSzMax();
+
+	for (int i = 0; i < 4; i++) {
+		GTEShader* sh = shaders[i];
+		glUseProgram(sh->shader);
+		if (sh->pgxpEnabledLoc != -1) glUniform1i(sh->pgxpEnabledLoc, g_PsxUsePgxp);
+		if (sh->szMaxLoc       != -1) glUniform1f(sh->szMaxLoc,        szMax);
+		if (sh->fogColorLoc    != -1) glUniform3fv(sh->fogColorLoc, 1, g_PsyX_FogColor);
+		if (sh->ditherForceLoc != -1) glUniform1f(sh->ditherForceLoc,  ditherForce);
+		if (sh->pixelScaleLoc  != -1) glUniform1f(sh->pixelScaleLoc,   pixelScale);
+	}
+	g_PreviousShader = -1;
+	g_lastTexFormat  = -1;
+#endif
+}
+
 #if USE_OPENGL
 
 GLint u_projectionLoc;
@@ -1560,49 +1584,14 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		break;
 	}
 
-	/* Push u_pgxpEnabled every shader bind so vertex shader's v_is3d
-	 * fallback ((u_pgxpEnabled > 0) ? a_zw.y test : 1.0) correctly
-	 * drops the 3D-only gate when PGXP is off at runtime. Without
-	 * this fallback, every prim got a_zw.y=0 → v_is3d=0 → no dither
-	 * and forced-nearest sampling on actual 3D geometry (visible as
-	 * blocky tree leaves). */
-	if (u_pgxpEnabledLoc != -1)
-		glUniform1i(u_pgxpEnabledLoc, g_PsxUsePgxp);
-
-	/* PGXP depth normalize: prev-frame max SZ. Lets the vertex shader turn each
-	 * vertex's unquantized SZ3 into continuous NDC depth (Z-fight fix). */
-	if (u_szMaxLoc != -1)
-		glUniform1f(u_szMaxLoc, PGXP_GetSzMax());
-
-	if (u_fogColorLoc != -1)
-		glUniform3fv(u_fogColorLoc, 1, g_PsyX_FogColor);
-
+	/* pgxp, szMax, fogColor, ditherForce, pixelScale are pre-pushed to all
+	 * shaders at DrawAllSplits start via GR_PushPerFrameUniforms().
+	 * Only fogToBlack must stay here — it changes per blend mode within a frame. */
 	if (u_fogToBlackLoc != -1)
 		glUniform1i(u_fogToBlackLoc, g_PsxFogToBlack);
 
 	if (u_fogStrengthLoc != -1)
 		glUniform1f(u_fogStrengthLoc, g_PsyX_FogStrength);
-
-	/* Push the dither-force uniform every shader bind. Cheap (single
-	 * float upload) and ensures runtime config changes (if we add a
-	 * hotkey toggle later) take effect on the next primitive.
-	 * g_PsxDitherSuppressed lets the game disable dither per-frame on
-	 * 2D-only states (menus, logos, inventory) without changing the
-	 * config flag. */
-	if (u_ditherForceLoc != -1)
-		glUniform1f(u_ditherForceLoc,
-		            (g_cfg_psxDither && !g_PsxDitherSuppressed) ? 1.0f : 0.0f);
-
-	/* Pixel scale = window width / PSX native (320). Scales the dither
-	 * cell so each PSX-pixel-equivalent on screen gets its own matrix
-	 * lookup, keeping the pattern visually proportional to PSX
-	 * regardless of resolution. */
-	if (u_pixelScaleLoc != -1) {
-		float pixelScale = (g_windowWidth > 0)
-			? ((float)g_windowWidth / 320.0f)
-			: 1.0f;
-		glUniform1f(u_pixelScaleLoc, pixelScale);
-	}
 
 	if (g_lastBoundTexture == texture) {
 		return;
