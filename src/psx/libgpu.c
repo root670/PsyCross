@@ -1,6 +1,7 @@
 #include "psx/libgte.h"
 #include "psx/libgpu.h"
 #include "psx/libetc.h"
+#include <SDL.h>
 
 #include "../gpu/PsyX_GPU.h"
 #include "PsyX/PsyX_render.h"
@@ -53,19 +54,47 @@ int ClearImage2(RECT16* rect, u_char r, u_char g, u_char b)
 
 int DrawSync(int mode)
 {
-	// Update VRAM seems needed to be here
-	GR_UpdateVRAM();
-	GR_ReadFramebufferDataToVRAM();
+	static u_int dsStatsLast = 0;
+	static double dsVRAMMs = 0, dsFBMs = 0, dsDrawMs = 0;
+	static int dsCalls = 0, dsVRAMSkip = 0;
 
-	if (g_splitIndex > 0)// && g_GPUDisabledState == 0) // don't do flips if nothing to draw.
+	u_int t0 = SDL_GetTicks();
+	extern int vram_need_update;
+	int had_vram_update = vram_need_update;
+	GR_UpdateVRAM();
+	u_int t1 = SDL_GetTicks();
+
+	GR_ReadFramebufferDataToVRAM();
+	u_int t2 = SDL_GetTicks();
+
+	if (g_splitIndex > 0)
 	{
 		DrawAllSplits();
-		//PsyX_EndScene();
 	}
+	u_int t3 = SDL_GetTicks();
 
 	if (drawsync_callback != NULL)
-	{
 		drawsync_callback();
+
+	dsVRAMMs += t1 - t0;
+	dsFBMs   += t2 - t1;
+	dsDrawMs += t3 - t2;
+	dsCalls++;
+	if (!had_vram_update) dsVRAMSkip++;
+
+	if (dsStatsLast == 0) dsStatsLast = t0;
+	if (t3 - dsStatsLast >= 5000)
+	{
+		float e = (t3 - dsStatsLast) / 1000.0f;
+		printf("[PERF/sync] %.1fs: calls=%d (%.1f/s)  VRAMUploadMs=%.2f (skip=%d)  FBReadMs=%.2f  DrawAllMs=%.2f\n",
+			e, dsCalls, dsCalls / e,
+			dsCalls > 0 ? dsVRAMMs  / dsCalls : 0.0, dsVRAMSkip,
+			dsCalls > 0 ? dsFBMs    / dsCalls : 0.0,
+			dsCalls > 0 ? dsDrawMs  / dsCalls : 0.0);
+		fflush(stdout);
+		dsVRAMMs = dsFBMs = dsDrawMs = 0;
+		dsCalls = dsVRAMSkip = 0;
+		dsStatsLast = t3;
 	}
 
 	return 0;
