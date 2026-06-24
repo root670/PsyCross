@@ -108,37 +108,6 @@ extern void GR_UpdateSwapIntervalState(int swapInterval);
 int g_vmode = -1;
 int g_frameSkip = 0;
 
-/* PerfGap globals */
-unsigned int g_perfGapMs[PSEG_COUNT]    = {0};
-unsigned int g_perfGapCalls[PSEG_COUNT] = {0};
-unsigned int g_perfPrevTick             = 0;
-unsigned int g_perfStatsTick            = 0;
-
-static const char* s_segNames[PSEG_COUNT] = {
-	"vsync→begin", "begin→otag", "otag_inner",
-	"otag→sync",   "sync_inner", "sync→end",
-	"end_inner",   "end→vsync",  "vsync_inner"
-};
-
-void PerfGap_Print(void)
-{
-	unsigned int now = SDL_GetTicks();
-	if (g_perfStatsTick == 0) { g_perfStatsTick = now; return; }
-	if (now - g_perfStatsTick < 5000) return;
-
-	float e = (now - g_perfStatsTick) / 1000.0f;
-	printf("[PERF/gaps] %.1fs:", e);
-	for (int i = 0; i < PSEG_COUNT; i++) {
-		unsigned int c = g_perfGapCalls[i];
-		printf("  %s=%.2fms(%u)", s_segNames[i],
-			c > 0 ? (double)g_perfGapMs[i] / c : 0.0, c);
-		g_perfGapMs[i] = g_perfGapCalls[i] = 0;
-	}
-	printf("\n");
-	fflush(stdout);
-	g_perfStatsTick = now;
-}
-
 #ifdef __EMSCRIPTEN__
 
 int g_emIntrInterval = -1;
@@ -215,17 +184,8 @@ int intrThreadMain(void* data)
 	 * Target 7328 → fires at 4233600/7328 ≈ 577.8 Hz → ~1.73ms period */
 	const double rcnt2Period = 1.0 / 577.8;
 
-	/* Perf counters — printed every 5s to stdout */
-	u_int statsLastTick  = SDL_GetTicks();
-	int statsIterations  = 0;
-	int statsVbl         = 0;
-	int statsRcnt2       = 0;
-	int statsVsyncCbMs   = 0;
-
 	while (!g_stopIntrThread)
 	{
-		statsIterations++;
-
 		// step counters
 		{
 			const double timestep = g_vmode == MODE_NTSC ? FIXED_TIME_STEP_NTSC : FIXED_TIME_STEP_PAL;
@@ -236,11 +196,7 @@ int intrThreadMain(void* data)
 				SDL_LockMutex(g_intrMutex);
 
 				if (vsync_callback)
-				{
-					u_int vcbStart = SDL_GetTicks();
 					vsync_callback();
-					statsVsyncCbMs += (int)(SDL_GetTicks() - vcbStart);
-				}
 
 				SDL_UnlockMutex(g_intrMutex);
 
@@ -249,7 +205,6 @@ int intrThreadMain(void* data)
 				if (g_vblSemaphore)
 					SDL_SemPost(g_vblSemaphore);
 
-				statsVbl++;
 				Util_GetHPCTime(&g_vblTimer, 1);
 			}
 
@@ -262,7 +217,6 @@ int intrThreadMain(void* data)
 					SDL_LockMutex(g_intrMutex);
 					PsyX_PumpRCnt2Timer();
 					SDL_UnlockMutex(g_intrMutex);
-					statsRcnt2++;
 					Util_GetHPCTime(&rcnt2Timer, 1);
 				}
 			}
@@ -275,22 +229,6 @@ int intrThreadMain(void* data)
 #else
 		SDL_Delay(1);
 #endif
-
-		/* Dump perf stats every 5 seconds */
-		u_int now = SDL_GetTicks();
-		if (now - statsLastTick >= 5000)
-		{
-			float elapsed = (now - statsLastTick) / 1000.0f;
-			printf("[PERF/intr] %.1fs: iterations=%d (%.0f/s)  vbl=%d (%.1f/s, expect 60)  rcnt2=%d (%.1f/s, expect 578)  vsyncCbMs=%d (%.2f/vbl)\n",
-				elapsed,
-				statsIterations, statsIterations / elapsed,
-				statsVbl,   statsVbl   / elapsed,
-				statsRcnt2, statsRcnt2 / elapsed,
-				statsVsyncCbMs, statsVbl > 0 ? (double)statsVsyncCbMs / statsVbl : 0.0);
-			fflush(stdout);
-			statsIterations = statsVbl = statsRcnt2 = statsVsyncCbMs = 0;
-			statsLastTick = now;
-		}
 	}
 
 	return 0;
@@ -945,16 +883,7 @@ char begin_scene_flag = 0;
 
 char PsyX_BeginScene()
 {
-	PerfGap_Mark(PSEG_VSYNC_TO_BEGIN);  /* gap: WaitForTimestep-return → here */
-
-	static u_int bsStatsLast = 0;
-	static double bsPollMs = 0, bsGRBeginMs = 0;
-	static int bsCount = 0;
-
-	u_int bsT0 = SDL_GetTicks();
 	PsyX_Sys_DoPollEvent();
-	u_int bsT1 = SDL_GetTicks();
-	bsPollMs += bsT1 - bsT0;
 
 	if (begin_scene_flag)
 		return 0;
@@ -972,29 +901,11 @@ char PsyX_BeginScene()
 		//		target 30fps, 50hz screen = 60hz interval (less tearing)
 		//		target 30fps, 60hz screen = 30hz interval (no tearing)
 		SDL_DisplayMode curMode;
+		if (SDL_GetWindowDisplayMode(g_window, &curMode) == 0)
 		{
-			/* Track how expensive SDL_GetWindowDisplayMode is — it's called
-			 * every frame and may be a syscall on some platforms. */
-			static u_int wdmTotalMs = 0, wdmCalls = 0, wdmStatsLast = 0;
-			u_int wdmT0 = SDL_GetTicks();
-			int ok = SDL_GetWindowDisplayMode(g_window, &curMode);
-			u_int wdmT1 = SDL_GetTicks();
-			wdmTotalMs += wdmT1 - wdmT0;
-			wdmCalls++;
-			if (wdmStatsLast == 0) wdmStatsLast = wdmT0;
-			if (wdmT1 - wdmStatsLast >= 5000) {
-				printf("[PERF/wdm] %.1fs: calls=%d  totalMs=%d  avgMs=%.3f\n",
-					(wdmT1 - wdmStatsLast) / 1000.0f,
-					wdmCalls, wdmTotalMs,
-					wdmCalls > 0 ? (double)wdmTotalMs / wdmCalls : 0.0);
-				fflush(stdout);
-				wdmTotalMs = wdmCalls = 0; wdmStatsLast = wdmT1;
-			}
-			if (ok == 0) {
-				const int mode_frequency = g_vmode == MODE_NTSC ? VBLANK_FREQUENCY_NTSC : VBLANK_FREQUENCY_PAL;
-				if (curMode.refresh_rate < mode_frequency)
-					swapInterval--;
-			}
+			const int mode_frequency = g_vmode == MODE_NTSC ? VBLANK_FREQUENCY_NTSC : VBLANK_FREQUENCY_PAL;
+			if (curMode.refresh_rate < mode_frequency)
+				swapInterval--;
 		}
 
 		if (swapInterval < 0)
@@ -1003,22 +914,7 @@ char PsyX_BeginScene()
 		GR_UpdateSwapIntervalState(swapInterval);
 	}
 
-	u_int bsT2 = SDL_GetTicks();
 	GR_BeginScene();
-	u_int bsT3 = SDL_GetTicks();
-	bsGRBeginMs += bsT3 - bsT2;
-	bsCount++;
-
-	if (bsStatsLast == 0) bsStatsLast = bsT0;
-	if (bsT3 - bsStatsLast >= 5000) {
-		float e = (bsT3 - bsStatsLast) / 1000.0f;
-		printf("[PERF/begin] %.1fs: frames=%d  avgPollMs=%.3f  avgGRBeginMs=%.3f\n",
-			e, bsCount,
-			bsCount > 0 ? bsPollMs    / bsCount : 0.0,
-			bsCount > 0 ? bsGRBeginMs / bsCount : 0.0);
-		fflush(stdout);
-		bsPollMs = bsGRBeginMs = 0; bsCount = 0; bsStatsLast = bsT3;
-	}
 
 	// Always clear the backbuffer at the start of every frame. The PSX
 	// behavior gates this on activeDrawEnv.isbg, but during state
@@ -1050,7 +946,6 @@ char PsyX_BeginScene()
 
 	PsyX_Log_Flush();
 
-	PerfGap_Mark(PSEG_BEGIN_TO_OTAG);   /* start timing: BeginScene-exit → next DrawOTag */
 	return 1;
 }
 
@@ -1064,7 +959,6 @@ extern "C" void (*g_PsyX_PostCaptureHook)(void) = NULL;
 
 void PsyX_EndScene()
 {
-	PerfGap_Mark(PSEG_SYNC_TO_END);     /* gap: DrawSync-exit → EndScene-entry */
 	if (!begin_scene_flag)
 		return;
 
@@ -1073,25 +967,22 @@ void PsyX_EndScene()
 
 	PGXP_CoverageTick();
 
-	static u_int esStatsLast    = 0;
-	static double esGREndMs     = 0, esFBStoreMs = 0, esCaptureMs = 0, esSwapMs = 0;
-	static int    esCount       = 0;
-
-	u_int t0 = SDL_GetTicks();
 	GR_EndScene();
-	u_int t1 = SDL_GetTicks();
 
 #ifndef PSYX_SKIP_FRAMEBUFFER_STORE
 	GR_StoreFrameBuffer(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 #endif
-	g_PsxSkipFramebufferStore = 0;
-	u_int t2 = SDL_GetTicks();
 
+	/* PC port: g_PsxSkipFramebufferStore is a per-frame opt-out — the game must
+	 * re-set it each tick during a TIM-protect screen (e.g. paper-map pickup). */
+	g_PsxSkipFramebufferStore = 0;
+
+	/* PC port: keep a copy of every composed frame for freeze-frame
+	 * presentation (skipped internally on frames that re-presented it). */
 	{
 		extern void GR_CaptureLastFrame(void);
 		GR_CaptureLastFrame();
 	}
-	u_int t3 = SDL_GetTicks();
 
 	/* PC port: draw overlays that must NOT be baked into the freeze-frame (the dev
 	 * console) — AFTER the capture, BEFORE the swap, so the console is a true live
@@ -1100,30 +991,6 @@ void PsyX_EndScene()
 		g_PsyX_PostCaptureHook();
 
 	GR_SwapWindow();
-	u_int t4 = SDL_GetTicks();
-	PerfGap_Mark(PSEG_END_INNER);       /* time inside EndScene (incl. swap) */
-
-	esGREndMs   += t1 - t0;
-	esFBStoreMs += t2 - t1;
-	esCaptureMs += t3 - t2;
-	esSwapMs    += t4 - t3;
-	esCount++;
-
-	if (esStatsLast == 0) esStatsLast = t0;
-	if (t4 - esStatsLast >= 5000)
-	{
-		float elapsed = (t4 - esStatsLast) / 1000.0f;
-		printf("[PERF/scene] %.1fs: frames=%d  GREnd=%.2fms  FBStore=%.2fms  Capture=%.2fms  Swap=%.2fms\n",
-			elapsed, esCount,
-			esCount > 0 ? esGREndMs   / esCount : 0.0,
-			esCount > 0 ? esFBStoreMs / esCount : 0.0,
-			esCount > 0 ? esCaptureMs / esCount : 0.0,
-			esCount > 0 ? esSwapMs    / esCount : 0.0);
-		fflush(stdout);
-		esGREndMs = esFBStoreMs = esCaptureMs = esSwapMs = 0;
-		esCount = 0;
-		esStatsLast = t4;
-	}
 }
 
 #if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
@@ -1260,7 +1127,6 @@ void PsyX_EnableSwapInterval(int enable)
 
 void PsyX_WaitForTimestep(int count)
 {
-	PerfGap_Mark(PSEG_END_TO_VSYNC);    /* gap: EndScene-exit → WaitForTimestep-entry */
 #if 0 // defined(RENDERER_OGL) || defined(RENDERER_OGLES)
 	glFinish(); // best time to complete GPU drawing
 #endif
@@ -1269,19 +1135,6 @@ void PsyX_WaitForTimestep(int count)
 	if (!g_skipSwapInterval)
 	{
 		static int swapLastVbl = 0;
-
-		/* Perf: track how long we actually block and print every 5s */
-		static u_int waitStatsLast  = 0;
-		static double waitTotalMs   = 0.0;
-		static int waitCalls        = 0;
-		static double frameWorkMs   = 0.0;
-		static u_int lastEndTick    = 0;
-
-		u_int waitStart = SDL_GetTicks();
-
-		/* Time spent in game logic since last WaitForTimestep returned */
-		if (lastEndTick != 0)
-			frameWorkMs += (double)(waitStart - lastEndTick);
 
 		if (g_vblSemaphore)
 		{
@@ -1304,31 +1157,6 @@ void PsyX_WaitForTimestep(int count)
 		}
 
 		swapLastVbl = PsyX_Sys_GetVBlankCount();
-		PerfGap_Mark(PSEG_VSYNC_INNER); /* time inside WaitForTimestep (semaphore wait) */
-		PerfGap_Print();                /* print & reset every 5s */
-		PerfGap_Mark(PSEG_VSYNC_TO_BEGIN); /* start timing gap to next BeginScene */
-
-		u_int waitEnd = SDL_GetTicks();
-		waitTotalMs += (double)(waitEnd - waitStart);
-		lastEndTick  = waitEnd;
-		waitCalls++;
-
-		if (waitStatsLast == 0) waitStatsLast = waitEnd;
-		if (waitEnd - waitStatsLast >= 5000)
-		{
-			float elapsed = (waitEnd - waitStatsLast) / 1000.0f;
-			printf("[PERF/wait] %.1fs: frames=%d (%.1f/s)  avgWaitMs=%.2f  avgWorkMs=%.2f  waitFrac=%.0f%%\n",
-				elapsed,
-				waitCalls, waitCalls / elapsed,
-				waitCalls > 0 ? waitTotalMs / waitCalls : 0.0,
-				waitCalls > 0 ? frameWorkMs / waitCalls : 0.0,
-				(waitTotalMs + frameWorkMs) > 0 ? 100.0 * waitTotalMs / (waitTotalMs + frameWorkMs) : 0.0);
-			fflush(stdout);
-			waitCalls    = 0;
-			waitTotalMs  = 0.0;
-			frameWorkMs  = 0.0;
-			waitStatsLast = waitEnd;
-		}
 	}
 }
 

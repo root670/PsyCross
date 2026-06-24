@@ -1246,9 +1246,6 @@ void DrawAllSplits()
 
 	GR_UpdateVertexBuffer(g_vertexBuffer, g_vertexIndex);
 
-	extern void GR_PushPerFrameUniforms();
-	GR_PushPerFrameUniforms();
-
 	for (int i = 1; i <= g_splitIndex; i++)
 		DrawSplit(g_splits[i]);
 

@@ -54,52 +54,14 @@ int ClearImage2(RECT16* rect, u_char r, u_char g, u_char b)
 
 int DrawSync(int mode)
 {
-	PerfGap_Mark(PSEG_OTAG_TO_SYNC);    /* gap: DrawOTag-exit → DrawSync-entry */
-	static u_int dsStatsLast = 0;
-	static double dsVRAMMs = 0, dsFBMs = 0, dsDrawMs = 0;
-	static int dsCalls = 0, dsVRAMSkip = 0;
-
-	u_int t0 = SDL_GetTicks();
-	extern int vram_need_update;
-	int had_vram_update = vram_need_update;
 	GR_UpdateVRAM();
-	u_int t1 = SDL_GetTicks();
-
 	GR_ReadFramebufferDataToVRAM();
-	u_int t2 = SDL_GetTicks();
 
 	if (g_splitIndex > 0)
-	{
 		DrawAllSplits();
-	}
-	u_int t3 = SDL_GetTicks();
 
 	if (drawsync_callback != NULL)
 		drawsync_callback();
-
-	PerfGap_Mark(PSEG_SYNC_INNER);
-	PerfGap_Mark(PSEG_SYNC_TO_END);     /* start timing gap to EndScene */
-
-	dsVRAMMs += t1 - t0;
-	dsFBMs   += t2 - t1;
-	dsDrawMs += t3 - t2;
-	dsCalls++;
-	if (!had_vram_update) dsVRAMSkip++;
-
-	if (dsStatsLast == 0) dsStatsLast = t0;
-	if (t3 - dsStatsLast >= 5000)
-	{
-		float e = (t3 - dsStatsLast) / 1000.0f;
-		printf("[PERF/sync] %.1fs: calls=%d (%.1f/s)  VRAMUploadMs=%.2f (skip=%d)  FBReadMs=%.2f  DrawAllMs=%.2f\n",
-			e, dsCalls, dsCalls / e,
-			dsCalls > 0 ? dsVRAMMs  / dsCalls : 0.0, dsVRAMSkip,
-			dsCalls > 0 ? dsFBMs    / dsCalls : 0.0,
-			dsCalls > 0 ? dsDrawMs  / dsCalls : 0.0);
-		fflush(stdout);
-		dsVRAMMs = dsFBMs = dsDrawMs = 0;
-		dsCalls = dsVRAMSkip = 0;
-		dsStatsLast = t3;
-	}
 
 	return 0;
 }
@@ -485,13 +447,11 @@ void DrawOTagEnv(u_long* p, DRAWENV* env)
 
 void DrawOTag(u_long* p)
 {
-	PerfGap_Mark(PSEG_BEGIN_TO_OTAG);   /* gap: BeginScene-exit → DrawOTag-entry */
 	do
 	{
 		if (g_GPUDisabledState)
 		{
 			ClearSplits();
-			PerfGap_Mark(PSEG_OTAG_INNER);
 			return;
 		}
 
@@ -503,35 +463,9 @@ void DrawOTag(u_long* p)
 		//if (activeDrawEnv.isbg)
 		//	ClearImage(&activeDrawEnv.clip, activeDrawEnv.r0, activeDrawEnv.g0, activeDrawEnv.b0);
 
-		static u_int parseStatsLast = 0;
-		static double parseMs = 0, drawMs = 0;
-		static int parseCalls = 0, totalSplits = 0;
-
-		u_int pt0 = SDL_GetTicks();
 		ParsePrimitivesLinkedList(p, 0);
-		u_int pt1 = SDL_GetTicks();
-		int splits = g_splitIndex;
-		DrawAllSplits();
-		u_int pt2 = SDL_GetTicks();
 
-		parseMs += pt1 - pt0;
-		drawMs  += pt2 - pt1;
-		totalSplits += splits;
-		parseCalls++;
-		if (parseStatsLast == 0) parseStatsLast = pt0;
-		if (pt2 - parseStatsLast >= 5000) {
-			float e = (pt2 - parseStatsLast) / 1000.0f;
-			printf("[PERF/otag] %.1fs: calls=%d (%.1f/s)  splits/call=%.0f  parseMs=%.2f  drawMs=%.2f  usPerSplit=%.1f\n",
-				e, parseCalls, parseCalls/e,
-				parseCalls>0 ? (double)totalSplits/parseCalls : 0.0,
-				parseCalls>0 ? parseMs/parseCalls : 0.0,
-				parseCalls>0 ? drawMs/parseCalls  : 0.0,
-				totalSplits>0 ? (drawMs*1000.0)/totalSplits : 0.0);
-			fflush(stdout);
-			parseMs = drawMs = totalSplits = 0; parseCalls = 0; parseStatsLast = pt2;
-		}
-		PerfGap_Mark(PSEG_OTAG_INNER);
-		PerfGap_Mark(PSEG_OTAG_TO_SYNC); /* start timing gap to DrawSync */
+		DrawAllSplits();
 	} while (g_dbg_emulatorPaused);
 }
  
