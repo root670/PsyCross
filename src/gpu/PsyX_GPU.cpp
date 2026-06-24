@@ -1244,11 +1244,48 @@ void DrawAllSplits()
 	}
 #endif // _DEBUG
 
-	// next code ideally should be called before EndScene
 	GR_UpdateVertexBuffer(g_vertexBuffer, g_vertexIndex);
 
-	for (int i = 1; i <= g_splitIndex; i++)
-		DrawSplit(g_splits[i]);
+	/* Batch consecutive splits with identical GL state into one draw call.
+	 * All vertices live in a single VBO, so merging is safe as long as the
+	 * vertex ranges are contiguous — which they always are (ParsePrimitive
+	 * appends to g_vertexBuffer sequentially). */
+	int i = 1;
+	while (i <= g_splitIndex)
+	{
+		const GPUDrawSplit& first = g_splits[i];
+		int batchEnd = i;
+
+		while (batchEnd + 1 <= g_splitIndex)
+		{
+			const GPUDrawSplit& next = g_splits[batchEnd + 1];
+			if (next.blendMode    != first.blendMode    ||
+			    next.texFormat    != first.texFormat    ||
+			    next.textureId    != first.textureId    ||
+			    next.drawPrimMode != first.drawPrimMode ||
+			    next.drawenv.dfe  != first.drawenv.dfe  ||
+			    next.drawenv.clip.x != first.drawenv.clip.x ||
+			    next.drawenv.clip.y != first.drawenv.clip.y ||
+			    next.drawenv.clip.w != first.drawenv.clip.w ||
+			    next.drawenv.clip.h != first.drawenv.clip.h)
+				break;
+			batchEnd++;
+		}
+
+		if (batchEnd > i)
+		{
+			GPUDrawSplit merged   = first;
+			merged.numVerts       = (g_splits[batchEnd].startVertex + g_splits[batchEnd].numVerts) - first.startVertex;
+			merged.debugText      = nullptr;
+			DrawSplit(merged);
+		}
+		else
+		{
+			DrawSplit(first);
+		}
+
+		i = batchEnd + 1;
+	}
 
 	ClearSplits();
 }
