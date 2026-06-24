@@ -1337,6 +1337,14 @@ int GR_InitialisePSX()
 
 void GR_Ortho2D(float left, float right, float bottom, float top, float znear, float zfar)
 {
+	/* Skip the matrix build and uniform upload when parameters are unchanged.
+	 * GR_SetOffscreenState calls this every split; for a 3D scene with 400
+	 * same-dfe splits this was 400 glUniformMatrix4fv calls per DrawOTag. */
+	static float pl = -1e9f, pr = -1e9f, pb = -1e9f, pt = -1e9f, pzn = -1e9f, pzf = -1e9f;
+	if (left == pl && right == pr && bottom == pb && top == pt && znear == pzn && zfar == pzf)
+		return;
+	pl = left; pr = right; pb = bottom; pt = top; pzn = znear; pzf = zfar;
+
 	float a = 2.0f / (right - left);
 	float b = 2.0f / (top - bottom);
 	float c = 2.0f / (znear - zfar);
@@ -1344,8 +1352,7 @@ void GR_Ortho2D(float left, float right, float bottom, float top, float znear, f
 	float x = (left + right) / (left - right);
 	float y = (bottom + top) / (bottom - top);
 
-#if USE_OPENGL 
-	// -1..1
+#if USE_OPENGL
 	float z = (znear + zfar) / (znear - zfar);
 #endif
 
@@ -2513,7 +2520,11 @@ void GR_SetPolygonOffset(float ofs)
 void GR_SetViewPort(int x, int y, int width, int height)
 {
 #if USE_OPENGL
-	glViewport(x, y, width, height);
+	static int pvx = -1, pvy = -1, pvw = -1, pvh = -1;
+	if (x != pvx || y != pvy || width != pvw || height != pvh) {
+		glViewport(x, y, width, height);
+		pvx = x; pvy = y; pvw = width; pvh = height;
+	}
 #endif
 }
 
