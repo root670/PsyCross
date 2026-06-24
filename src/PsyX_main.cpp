@@ -185,10 +185,11 @@ int intrThreadMain(void* data)
 	const double rcnt2Period = 1.0 / 577.8;
 
 	/* Perf counters — printed every 5s to stdout */
-	u_int statsLastTick = SDL_GetTicks();
-	int statsIterations = 0;
-	int statsVbl        = 0;
-	int statsRcnt2      = 0;
+	u_int statsLastTick  = SDL_GetTicks();
+	int statsIterations  = 0;
+	int statsVbl         = 0;
+	int statsRcnt2       = 0;
+	int statsVsyncCbMs   = 0;
 
 	while (!g_stopIntrThread)
 	{
@@ -204,7 +205,11 @@ int intrThreadMain(void* data)
 				SDL_LockMutex(g_intrMutex);
 
 				if (vsync_callback)
+				{
+					u_int vcbStart = SDL_GetTicks();
 					vsync_callback();
+					statsVsyncCbMs += (int)(SDL_GetTicks() - vcbStart);
+				}
 
 				SDL_UnlockMutex(g_intrMutex);
 
@@ -245,13 +250,14 @@ int intrThreadMain(void* data)
 		if (now - statsLastTick >= 5000)
 		{
 			float elapsed = (now - statsLastTick) / 1000.0f;
-			printf("[PERF/intr] %.1fs: iterations=%d (%.0f/s)  vbl=%d (%.1f/s, expect 60)  rcnt2=%d (%.1f/s, expect 578)\n",
+			printf("[PERF/intr] %.1fs: iterations=%d (%.0f/s)  vbl=%d (%.1f/s, expect 60)  rcnt2=%d (%.1f/s, expect 578)  vsyncCbMs=%d (%.2f/vbl)\n",
 				elapsed,
 				statsIterations, statsIterations / elapsed,
 				statsVbl,   statsVbl   / elapsed,
-				statsRcnt2, statsRcnt2 / elapsed);
+				statsRcnt2, statsRcnt2 / elapsed,
+				statsVsyncCbMs, statsVbl > 0 ? (double)statsVsyncCbMs / statsVbl : 0.0);
 			fflush(stdout);
-			statsIterations = statsVbl = statsRcnt2 = 0;
+			statsIterations = statsVbl = statsRcnt2 = statsVsyncCbMs = 0;
 			statsLastTick = now;
 		}
 	}
@@ -926,11 +932,29 @@ char PsyX_BeginScene()
 		//		target 30fps, 50hz screen = 60hz interval (less tearing)
 		//		target 30fps, 60hz screen = 30hz interval (no tearing)
 		SDL_DisplayMode curMode;
-		if (SDL_GetWindowDisplayMode(g_window, &curMode) == 0)
 		{
-			const int mode_frequency = g_vmode == MODE_NTSC ? VBLANK_FREQUENCY_NTSC : VBLANK_FREQUENCY_PAL;
-			if (curMode.refresh_rate < mode_frequency)
-				swapInterval--;
+			/* Track how expensive SDL_GetWindowDisplayMode is — it's called
+			 * every frame and may be a syscall on some platforms. */
+			static u_int wdmTotalMs = 0, wdmCalls = 0, wdmStatsLast = 0;
+			u_int wdmT0 = SDL_GetTicks();
+			int ok = SDL_GetWindowDisplayMode(g_window, &curMode);
+			u_int wdmT1 = SDL_GetTicks();
+			wdmTotalMs += wdmT1 - wdmT0;
+			wdmCalls++;
+			if (wdmStatsLast == 0) wdmStatsLast = wdmT0;
+			if (wdmT1 - wdmStatsLast >= 5000) {
+				printf("[PERF/wdm] %.1fs: calls=%d  totalMs=%d  avgMs=%.3f\n",
+					(wdmT1 - wdmStatsLast) / 1000.0f,
+					wdmCalls, wdmTotalMs,
+					wdmCalls > 0 ? (double)wdmTotalMs / wdmCalls : 0.0);
+				fflush(stdout);
+				wdmTotalMs = wdmCalls = 0; wdmStatsLast = wdmT1;
+			}
+			if (ok == 0) {
+				const int mode_frequency = g_vmode == MODE_NTSC ? VBLANK_FREQUENCY_NTSC : VBLANK_FREQUENCY_PAL;
+				if (curMode.refresh_rate < mode_frequency)
+					swapInterval--;
+			}
 		}
 
 		if (swapInterval < 0)
@@ -992,22 +1016,25 @@ void PsyX_EndScene()
 
 	PGXP_CoverageTick();
 
+	static u_int esStatsLast    = 0;
+	static double esGREndMs     = 0, esFBStoreMs = 0, esCaptureMs = 0, esSwapMs = 0;
+	static int    esCount       = 0;
+
+	u_int t0 = SDL_GetTicks();
 	GR_EndScene();
+	u_int t1 = SDL_GetTicks();
 
 #ifndef PSYX_SKIP_FRAMEBUFFER_STORE
 	GR_StoreFrameBuffer(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 #endif
-
-	/* PC port: g_PsxSkipFramebufferStore is a per-frame opt-out — the game must
-	 * re-set it each tick during a TIM-protect screen (e.g. paper-map pickup). */
 	g_PsxSkipFramebufferStore = 0;
+	u_int t2 = SDL_GetTicks();
 
-	/* PC port: keep a copy of every composed frame for freeze-frame
-	 * presentation (skipped internally on frames that re-presented it). */
 	{
 		extern void GR_CaptureLastFrame(void);
 		GR_CaptureLastFrame();
 	}
+	u_int t3 = SDL_GetTicks();
 
 	/* PC port: draw overlays that must NOT be baked into the freeze-frame (the dev
 	 * console) — AFTER the capture, BEFORE the swap, so the console is a true live
@@ -1016,6 +1043,29 @@ void PsyX_EndScene()
 		g_PsyX_PostCaptureHook();
 
 	GR_SwapWindow();
+	u_int t4 = SDL_GetTicks();
+
+	esGREndMs   += t1 - t0;
+	esFBStoreMs += t2 - t1;
+	esCaptureMs += t3 - t2;
+	esSwapMs    += t4 - t3;
+	esCount++;
+
+	if (esStatsLast == 0) esStatsLast = t0;
+	if (t4 - esStatsLast >= 5000)
+	{
+		float elapsed = (t4 - esStatsLast) / 1000.0f;
+		printf("[PERF/scene] %.1fs: frames=%d  GREnd=%.2fms  FBStore=%.2fms  Capture=%.2fms  Swap=%.2fms\n",
+			elapsed, esCount,
+			esCount > 0 ? esGREndMs   / esCount : 0.0,
+			esCount > 0 ? esFBStoreMs / esCount : 0.0,
+			esCount > 0 ? esCaptureMs / esCount : 0.0,
+			esCount > 0 ? esSwapMs    / esCount : 0.0);
+		fflush(stdout);
+		esGREndMs = esFBStoreMs = esCaptureMs = esSwapMs = 0;
+		esCount = 0;
+		esStatsLast = t4;
+	}
 }
 
 #if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
