@@ -497,9 +497,29 @@ void DrawOTag(u_long* p)
 		//if (activeDrawEnv.isbg)
 		//	ClearImage(&activeDrawEnv.clip, activeDrawEnv.r0, activeDrawEnv.g0, activeDrawEnv.b0);
 
-		ParsePrimitivesLinkedList(p, 0);
+		static u_int parseStatsLast = 0;
+		static double parseMs = 0, drawMs = 0;
+		static int parseCalls = 0;
 
+		u_int pt0 = SDL_GetTicks();
+		ParsePrimitivesLinkedList(p, 0);
+		u_int pt1 = SDL_GetTicks();
 		DrawAllSplits();
+		u_int pt2 = SDL_GetTicks();
+
+		parseMs += pt1 - pt0;
+		drawMs  += pt2 - pt1;
+		parseCalls++;
+		if (parseStatsLast == 0) parseStatsLast = pt0;
+		if (pt2 - parseStatsLast >= 5000) {
+			float e = (pt2 - parseStatsLast) / 1000.0f;
+			printf("[PERF/otag] %.1fs: calls=%d (%.1f/s)  parseMs=%.2f  drawMs=%.2f\n",
+				e, parseCalls, parseCalls/e,
+				parseCalls>0 ? parseMs/parseCalls : 0.0,
+				parseCalls>0 ? drawMs/parseCalls  : 0.0);
+			fflush(stdout);
+			parseMs = drawMs = 0; parseCalls = 0; parseStatsLast = pt2;
+		}
 	} while (g_dbg_emulatorPaused);
 }
  
