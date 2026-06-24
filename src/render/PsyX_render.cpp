@@ -1337,13 +1337,16 @@ int GR_InitialisePSX()
 
 void GR_Ortho2D(float left, float right, float bottom, float top, float znear, float zfar)
 {
-	/* Skip the matrix build and uniform upload when parameters are unchanged.
-	 * GR_SetOffscreenState calls this every split; for a 3D scene with 400
-	 * same-dfe splits this was 400 glUniformMatrix4fv calls per DrawOTag. */
+	/* Skip the matrix build and uniform upload when parameters AND shader are
+	 * unchanged. Must re-upload when shader changes because u_projectionLoc
+	 * points to a different uniform location in the new program. */
 	static float pl = -1e9f, pr = -1e9f, pb = -1e9f, pt = -1e9f, pzn = -1e9f, pzf = -1e9f;
-	if (left == pl && right == pr && bottom == pb && top == pt && znear == pzn && zfar == pzf)
+	static ShaderID s_orthoShader = -1;
+	if (left == pl && right == pr && bottom == pb && top == pt && znear == pzn && zfar == pzf
+	    && s_orthoShader == g_PreviousShader)
 		return;
 	pl = left; pr = right; pb = bottom; pt = top; pzn = znear; pzf = zfar;
+	s_orthoShader = g_PreviousShader;
 
 	float a = 2.0f / (right - left);
 	float b = 2.0f / (top - bottom);
