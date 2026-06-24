@@ -2,6 +2,10 @@
 #include <windows.h>
 #endif // _WIN32
 
+#ifdef __SWITCH__
+extern "C" void svcSleepThread(long long nano);
+#endif
+
 #include "PsyX_main.h"
 
 #include "PsyX/PsyX_version.h"
@@ -73,6 +77,7 @@ volatile int g_psxSysCounters[PsxCounter_Num];
 
 SDL_Thread* g_intrThread = NULL;
 SDL_mutex* g_intrMutex = NULL;
+static SDL_sem* g_vblSemaphore = NULL;
 volatile char g_stopIntrThread = 0;
 
 #if defined(_LANGUAGE_C_PLUS_PLUS)||defined(__cplusplus)||defined(c_plusplus)
@@ -197,6 +202,8 @@ int intrThreadMain(void* data)
 
 				// do vblank events
 				g_psxSysCounters[PsxCounter_VBLANK]++;
+				if (g_vblSemaphore)
+					SDL_SemPost(g_vblSemaphore);
 
 				Util_GetHPCTime(&g_vblTimer, 1);
 			}
@@ -221,11 +228,14 @@ int intrThreadMain(void* data)
 		 * SDL_GetTicks ms delta, no-op unless `adsr 1`. */
 		PsyX_SPUAL_Update();
 
-		/* Yield the time slice so this thread doesn't pin a core at 100%.
-		 * SDL_Delay(0) on Switch calls svcSleepThread(0) — gives up the
-		 * current quantum without adding a fixed sleep, keeping rcnt2
-		 * timing accurate at 1.73ms. */
-		SDL_Delay(0);
+		/* Sleep briefly so this thread doesn't pin a core at 100%.
+		 * rcnt2 fires every 1.73ms; sleeping 200μs keeps timing within ~6%.
+		 * SDL_Delay(1) would be 1ms minimum — too coarse for 1.73ms period. */
+#if defined(__SWITCH__)
+		svcSleepThread(200000LL); /* 200 microseconds in nanoseconds */
+#else
+		SDL_Delay(1);
+#endif
 	}
 
 	return 0;
@@ -237,6 +247,13 @@ static int PsyX_Sys_InitialiseCore()
 	Util_InitHPCTimer(&g_vblTimer);
 #else
 
+	g_vblSemaphore = SDL_CreateSemaphore(0);
+	if (NULL == g_vblSemaphore)
+	{
+		eprinterr("SDL_CreateSemaphore failed: %s\n", SDL_GetError());
+		return 0;
+	}
+
 	g_intrThread = SDL_CreateThread(intrThreadMain, "psyX_intr", NULL);
 
 	if (NULL == g_intrThread)
@@ -244,7 +261,7 @@ static int PsyX_Sys_InitialiseCore()
 		eprinterr("SDL_CreateThread failed: %s\n", SDL_GetError());
 		return 0;
 	}
-	
+
 	g_intrMutex = SDL_CreateMutex();
 	if (NULL == g_intrMutex)
 	{
@@ -1123,18 +1140,28 @@ void PsyX_WaitForTimestep(int count)
 
 	// wait for vblank
 	if (!g_skipSwapInterval)
-	{	
+	{
 		static int swapLastVbl = 0;
 
-		int vbl;
-		do
+		if (g_vblSemaphore)
 		{
-#ifdef __EMSCRIPTEN__
-			emscripten_sleep(0);
-#endif
-			vbl = PsyX_Sys_GetVBlankCount();
+			/* Sleep until the interrupt thread signals each VBlank.
+			 * 100ms timeout guards against the interrupt thread dying. */
+			for (int i = 0; i < count; i++)
+				SDL_SemWaitTimeout(g_vblSemaphore, 100);
 		}
-		while (vbl - swapLastVbl < count);
+		else
+		{
+			int vbl;
+			do
+			{
+#ifdef __EMSCRIPTEN__
+				emscripten_sleep(0);
+#endif
+				vbl = PsyX_Sys_GetVBlankCount();
+			}
+			while (vbl - swapLastVbl < count);
+		}
 
 		swapLastVbl = PsyX_Sys_GetVBlankCount();
 	}
@@ -1175,6 +1202,8 @@ void PsyX_Shutdown()
 		SDL_WaitThread(g_intrThread, &returnValue);
 
 		SDL_DestroyMutex(g_intrMutex);
+		SDL_DestroySemaphore(g_vblSemaphore);
+		g_vblSemaphore = NULL;
 	}
 	SHUTDOWN_STAGE("vblank thread joined");
 
