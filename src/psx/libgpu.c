@@ -505,26 +505,30 @@ void DrawOTag(u_long* p)
 
 		static u_int parseStatsLast = 0;
 		static double parseMs = 0, drawMs = 0;
-		static int parseCalls = 0;
+		static int parseCalls = 0, totalSplits = 0;
 
 		u_int pt0 = SDL_GetTicks();
 		ParsePrimitivesLinkedList(p, 0);
 		u_int pt1 = SDL_GetTicks();
+		int splits = g_splitIndex;
 		DrawAllSplits();
 		u_int pt2 = SDL_GetTicks();
 
 		parseMs += pt1 - pt0;
 		drawMs  += pt2 - pt1;
+		totalSplits += splits;
 		parseCalls++;
 		if (parseStatsLast == 0) parseStatsLast = pt0;
 		if (pt2 - parseStatsLast >= 5000) {
 			float e = (pt2 - parseStatsLast) / 1000.0f;
-			printf("[PERF/otag] %.1fs: calls=%d (%.1f/s)  parseMs=%.2f  drawMs=%.2f\n",
+			printf("[PERF/otag] %.1fs: calls=%d (%.1f/s)  splits/call=%.0f  parseMs=%.2f  drawMs=%.2f  usPerSplit=%.1f\n",
 				e, parseCalls, parseCalls/e,
+				parseCalls>0 ? (double)totalSplits/parseCalls : 0.0,
 				parseCalls>0 ? parseMs/parseCalls : 0.0,
-				parseCalls>0 ? drawMs/parseCalls  : 0.0);
+				parseCalls>0 ? drawMs/parseCalls  : 0.0,
+				totalSplits>0 ? (drawMs*1000.0)/totalSplits : 0.0);
 			fflush(stdout);
-			parseMs = drawMs = 0; parseCalls = 0; parseStatsLast = pt2;
+			parseMs = drawMs = totalSplits = 0; parseCalls = 0; parseStatsLast = pt2;
 		}
 		PerfGap_Mark(PSEG_OTAG_INNER);
 		PerfGap_Mark(PSEG_OTAG_TO_SYNC); /* start timing gap to DrawSync */
