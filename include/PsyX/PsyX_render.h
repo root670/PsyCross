@@ -169,7 +169,8 @@ typedef enum
 	TF_8_BIT,
 	TF_16_BIT,
 
-	TF_32_BIT_RGBA		// custom texture
+	TF_32_BIT_RGBA,		// custom texture
+	TF_FLAT,			// diagnostic: flat v_color output, no texture sampling
 } TexFormat;
 
 

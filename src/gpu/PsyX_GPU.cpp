@@ -10,6 +10,10 @@
 #include <math.h>
 #include <string.h>
 
+#ifdef __SWITCH__
+#include <SDL.h>
+#endif
+
 #include "psx/gtereg.h"
 
 #define GET_TPAGE_FORMAT(tpage) ((TexFormat)((tpage >> 7) & 0x3))
@@ -24,6 +28,13 @@ OT_TAG prim_terminator = { (uintptr_t)-1, 0 }; // P_TAG with zero primLength
 
 int g_currentOTBucketCount = 0;
 float g_otBucketDepth = 0.0f;
+
+/* Perf counters: reset each frame in DrawAllSplits, read externally (main_switch.c). */
+int g_perf_splits3d   = 0;
+int g_perf_verts3d    = 0;
+int g_perf_splits2d   = 0;
+int g_perf_verts2d    = 0;
+float g_perf_submit_ms = 0.0f;  /* wall-clock CPU time for the DrawAllSplits loop (ms) */
 
 /* ----------------------------------------------------------------------------
  * PGXP (perspective-correct rendering) — shadow-memory model, DuckStation-faithful.
@@ -1207,6 +1218,14 @@ void DrawSplit(const GPUDrawSplit& split)
 
 	GR_DrawTriangles(split.startVertex, split.numVerts / 3);
 
+	if (drawOnScreen) {
+		g_perf_splits2d++;
+		g_perf_verts2d += split.numVerts;
+	} else {
+		g_perf_splits3d++;
+		g_perf_verts3d += split.numVerts;
+	}
+
 	if (split.debugText)
 		GR_PopDebugLabel();
 }
@@ -1246,8 +1265,25 @@ void DrawAllSplits()
 
 	GR_UpdateVertexBuffer(g_vertexBuffer, g_vertexIndex);
 
+	g_perf_splits3d = 0; g_perf_verts3d = 0;
+	g_perf_splits2d = 0; g_perf_verts2d = 0;
+
+#ifdef __SWITCH__
+	Uint64 t0 = SDL_GetPerformanceCounter();
+#endif
+
 	for (int i = 1; i <= g_splitIndex; i++)
 		DrawSplit(g_splits[i]);
+
+#ifdef __SWITCH__
+	{
+		Uint64 t1 = SDL_GetPerformanceCounter();
+		double freq = (double)SDL_GetPerformanceFrequency();
+		float ms = (float)((double)(t1 - t0) / freq * 1000.0);
+		/* Exponential moving average (α=0.1) to smooth per-DrawOTag noise. */
+		g_perf_submit_ms = g_perf_submit_ms * 0.9f + ms * 0.1f;
+	}
+#endif
 
 	ClearSplits();
 }

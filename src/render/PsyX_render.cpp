@@ -620,6 +620,7 @@ GTEShader g_gte_shader_4;
 GTEShader g_gte_shader_8;
 GTEShader g_gte_shader_16;
 GTEShader g_gte_shader_32_rgba;
+GTEShader g_gte_shader_flat;
 
 #if USE_OPENGL
 
@@ -969,6 +970,25 @@ const char* gte_shader_32_rgba =
 	"	}\n"
 	"#endif\n";
 
+/* Diagnostic: outputs v_color only. Zero texture samples.
+ * Used by g_dbg_texturelessMode to actually measure fragment texture cost
+ * (the previous approach swapped to g_whiteTexture but kept the CLUT shader
+ * running the same number of dependent samples against white data). */
+const char* gte_shader_flat =
+	"AFFINE_VARYING vec4 v_texcoord;\n"
+	"varying vec4 v_color;\n"
+	"AFFINE_VARYING vec4 v_page_clut;\n"
+	"varying float v_z;\n"
+	"varying float v_fogAmount;\n"
+	"varying float v_is3d;\n"
+	"#ifdef VERTEX\n"
+	GTE_VERTEX_SHADER
+	"#else\n"
+	"	void main() {\n"
+	"		fragColor = v_color;\n"
+	"	}\n"
+	"#endif\n";
+
 int GR_Shader_CheckShaderStatus(GLuint shader)
 {
 	char info[1024];
@@ -1198,6 +1218,7 @@ void GR_InitialisePSXShaders()
 	GR_CompilePSXShader(&g_gte_shader_8, gte_shader_8);
 	GR_CompilePSXShader(&g_gte_shader_16, gte_shader_16);
 	GR_CompilePSXShader(&g_gte_shader_32_rgba, gte_shader_32_rgba);
+	GR_CompilePSXShader(&g_gte_shader_flat, gte_shader_flat);
 }
 
 int GR_InitialisePSX()
@@ -1475,8 +1496,11 @@ void GR_SetShader(const ShaderID shader)
 
 void GR_SetTexture(TextureID texture, TexFormat texFormat)
 {
+	/* Redirect to flat-color shader: zero texture samples, just v_color output.
+	 * Previous implementation swapped to g_whiteTexture but kept the CLUT shader
+	 * running the same dependent-texture chain — this correctly bypasses it. */
 	if (g_dbg_texturelessMode)
-		texture = g_whiteTexture;
+		texFormat = TF_FLAT;
 
 	/* Same shader (format) AND same texture — nothing to do. */
 	if ((int)texFormat == g_lastTexFormat && texture == g_lastBoundTexture)
@@ -1557,6 +1581,19 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		u_fogStrengthLoc = g_gte_shader_32_rgba.fogStrengthLoc;
 		u_pgxpEnabledLoc = g_gte_shader_32_rgba.pgxpEnabledLoc;
 		u_szMaxLoc = g_gte_shader_32_rgba.szMaxLoc;
+		break;
+	case TF_FLAT:
+		GR_SetShader(g_gte_shader_flat.shader);
+		u_bilinearFilterLoc = -1;
+		u_ditherForceLoc = -1;
+		u_pixelScaleLoc = -1;
+		u_projectionLoc = g_gte_shader_flat.projectionLoc;
+		u_projection3DLoc = g_gte_shader_flat.projection3DLoc;
+		u_texelSizeLoc = -1;
+		u_fogColorLoc = -1;
+		u_fogToBlackLoc = -1;
+		u_pgxpEnabledLoc = g_gte_shader_flat.pgxpEnabledLoc;
+		u_szMaxLoc = g_gte_shader_flat.szMaxLoc;
 		break;
 	}
 
