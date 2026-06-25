@@ -36,6 +36,10 @@ int g_perf_splits2d   = 0;
 int g_perf_verts2d    = 0;
 float g_perf_submit_ms = 0.0f;  /* wall-clock CPU time for the DrawAllSplits loop (ms) */
 
+/* Optional callback fired every ~180 DrawAllSplits calls (~3s at 60fps).
+ * Set from main_switch.c; null by default. Runs on the main thread. */
+void (*g_perf_callback)(int s3d, int v3d, int s2d, int v2d, float ms) = 0;
+
 /* ----------------------------------------------------------------------------
  * PGXP (perspective-correct rendering) — shadow-memory model, DuckStation-faithful.
  *
@@ -1192,7 +1196,7 @@ void DrawSplit(const GPUDrawSplit& split)
 		 * the gameplay world's dfe (-> enable=!dfe -> which GR_SetOffscreenState
 		 * branch / ortho) is visible in one in-game capture. */
 		static int bigSplitLog = 0;
-		if (bigSplitLog < 40 && split.numVerts >= 60) {
+		if (bigSplitLog < 5 && split.numVerts >= 60) {
 			eprintf("[WORLDSPLIT] verts=%d dfe=%d fmt=%d blend=%d texId=%u clip=(%d,%d,%d,%d)\n",
 				split.numVerts, split.drawenv.dfe, split.texFormat, split.blendMode,
 				(unsigned)split.textureId, split.drawenv.clip.x, split.drawenv.clip.y,
@@ -1286,6 +1290,16 @@ void DrawAllSplits()
 #endif
 
 	ClearSplits();
+
+	if (g_perf_callback) {
+		static int s_tick = 0;
+		if (++s_tick >= 180) {
+			s_tick = 0;
+			g_perf_callback(g_perf_splits3d, g_perf_verts3d,
+			                g_perf_splits2d, g_perf_verts2d,
+			                g_perf_submit_ms);
+		}
+	}
 }
 
 // forward declarations
