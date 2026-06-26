@@ -170,6 +170,13 @@ int g_cfg_affineTextures = 0;
  * (which masks texture-page seams and gives the authentic look) on
  * primitives that don't request dither at the prim-tag level. */
 int g_cfg_psxDither = 1;
+/* When 0, the per-primitive dither term (v_texcoord.w, sourced from the
+ * tpage DTD bit / draw-env dtd flag) is zeroed in the GPU_DITHERING macros.
+ * This is the only lever that removes the residual ordered-dither grain on
+ * primitives whose tpage/draw-env set the DTD bit — it survives even when
+ * g_cfg_psxDither (u_ditherForce) is 0 (e.g. bilinear mode). Default 1.
+ * (config key: screen_dither) */
+int g_cfg_screenDither = 1;
 int g_PsxDitherSuppressed = 0;
 
 int vram_need_update = 1;
@@ -606,6 +613,7 @@ typedef struct
 	GLint projection3DLoc;
 	GLint bilinearFilterLoc;
 	GLint ditherForceLoc;
+	GLint perPrimDitherLoc;
 	GLint pixelScaleLoc;
 	GLint texelSizeLoc;
 	GLint fogColorLoc;
@@ -628,6 +636,7 @@ GLint u_projectionLoc;
 GLint u_projection3DLoc;
 GLint u_bilinearFilterLoc;
 GLint u_ditherForceLoc;
+GLint u_perPrimDitherLoc;
 GLint u_pixelScaleLoc;
 GLint u_texelSizeLoc;
 GLint u_fogColorLoc;
@@ -695,7 +704,7 @@ int g_PsxFogToBlack = 0;
 		"			-3.0,  +1.0,  -4.0,  +0.0,\n"\
 		"			+3.0,  -1.0,  +2.0,  -2.0) / 255.0;\n"\
 		"		ivec2 dc = ivec2(fract(gl_FragCoord.xy / 4.0) * 4.0);\n"\
-		"		float dStrength = max(v_texcoord.w, u_ditherForce) * v_is3d;\n"\
+		"		float dStrength = max(v_texcoord.w * u_perPrimDither, u_ditherForce) * v_is3d;\n"\
 		"		fragColor.xyz += vec3(dither[dc.x][dc.y] * dStrength);\n"\
 		"		if (u_ditherForce > 0.5 && v_is3d > 0.5) {\n"\
 		"		    fragColor.xyz = floor(fragColor.xyz * 32.0 + 0.5) / 32.0;\n"\
@@ -722,7 +731,7 @@ int g_PsxFogToBlack = 0;
 		"			-3.0,  +1.0,  -4.0,  +0.0,\n"\
 		"			+3.0,  -1.0,  +2.0,  -2.0) / 255.0;\n"\
 		"		ivec2 dc = ivec2(fract(gl_FragCoord.xy / 8.0) * 4.0);\n"\
-		"		float dStrength = max(v_texcoord.w, u_ditherForce) * v_is3d * (1.0 - float(u_fogToBlack));\n"\
+		"		float dStrength = max(v_texcoord.w * u_perPrimDither, u_ditherForce) * v_is3d * (1.0 - float(u_fogToBlack));\n"\
 		"		fragColor.xyz += vec3(dither[dc.x][dc.y] * dStrength);\n"\
 		"		if (u_ditherForce > 0.5 && v_is3d > 0.5) {\n"\
 		"		    fragColor.xyz = floor(fragColor.xyz * 32.0 + 0.5) / 32.0;\n"\
@@ -891,6 +900,7 @@ int g_PsxFogToBlack = 0;
 	GPU_NEAREST_SAMPLE_FUNC\
 	"	uniform int bilinearFilter;\n"\
 	"	uniform float u_ditherForce;\n"\
+	"	uniform float u_perPrimDither;\n"\
 	"	uniform float u_pixelScale;\n"\
 	"	uniform vec3 u_fogColor;\n"\
 	"	uniform int u_fogToBlack;\n"\
@@ -961,6 +971,7 @@ const char* gte_shader_32_rgba =
 	"	uniform sampler2D s_texture;\n"\
 	"	uniform int bilinearFilter;\n"\
 	"	uniform float u_ditherForce;\n"\
+	"	uniform float u_perPrimDither;\n"\
 	"	uniform float u_pixelScale;\n"\
 	"	uniform vec2 texelSize;\n"\
 	"	void main() {\n"\
@@ -1201,6 +1212,7 @@ void GR_CompilePSXShader(GTEShader* sh, const char* source)
 	
 	sh->bilinearFilterLoc = glGetUniformLocation(sh->shader, "bilinearFilter");
 	sh->ditherForceLoc = glGetUniformLocation(sh->shader, "u_ditherForce");
+	sh->perPrimDitherLoc = glGetUniformLocation(sh->shader, "u_perPrimDither");
 	sh->pixelScaleLoc = glGetUniformLocation(sh->shader, "u_pixelScale");
 	sh->projectionLoc = glGetUniformLocation(sh->shader, "Projection");
 	sh->texelSizeLoc = glGetUniformLocation(sh->shader, "texelSize");
@@ -1530,6 +1542,7 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		GR_SetShader(g_gte_shader_4.shader);
 		u_bilinearFilterLoc = g_gte_shader_4.bilinearFilterLoc;
 		u_ditherForceLoc = g_gte_shader_4.ditherForceLoc;
+		u_perPrimDitherLoc = g_gte_shader_4.perPrimDitherLoc;
 		u_pixelScaleLoc = g_gte_shader_4.pixelScaleLoc;
 		u_projectionLoc = g_gte_shader_4.projectionLoc;
 		u_projection3DLoc = g_gte_shader_4.projection3DLoc;
@@ -1544,6 +1557,7 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		GR_SetShader(g_gte_shader_8.shader);
 		u_bilinearFilterLoc = g_gte_shader_8.bilinearFilterLoc;
 		u_ditherForceLoc = g_gte_shader_8.ditherForceLoc;
+		u_perPrimDitherLoc = g_gte_shader_8.perPrimDitherLoc;
 		u_pixelScaleLoc = g_gte_shader_8.pixelScaleLoc;
 		u_projectionLoc = g_gte_shader_8.projectionLoc;
 		u_projection3DLoc = g_gte_shader_8.projection3DLoc;
@@ -1558,6 +1572,7 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		GR_SetShader(g_gte_shader_16.shader);
 		u_bilinearFilterLoc = g_gte_shader_16.bilinearFilterLoc;
 		u_ditherForceLoc = g_gte_shader_16.ditherForceLoc;
+		u_perPrimDitherLoc = g_gte_shader_16.perPrimDitherLoc;
 		u_pixelScaleLoc = g_gte_shader_16.pixelScaleLoc;
 		u_projectionLoc = g_gte_shader_16.projectionLoc;
 		u_projection3DLoc = g_gte_shader_16.projection3DLoc;
@@ -1572,6 +1587,7 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		GR_SetShader(g_gte_shader_32_rgba.shader);
 		u_bilinearFilterLoc = -1;
 		u_ditherForceLoc = -1;
+		u_perPrimDitherLoc = -1;
 		u_pixelScaleLoc = -1;
 		u_projectionLoc = g_gte_shader_32_rgba.projectionLoc;
 		u_projection3DLoc = g_gte_shader_32_rgba.projection3DLoc;
@@ -1586,6 +1602,7 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		GR_SetShader(g_gte_shader_flat.shader);
 		u_bilinearFilterLoc = -1;
 		u_ditherForceLoc = -1;
+		u_perPrimDitherLoc = -1;
 		u_pixelScaleLoc = -1;
 		u_projectionLoc = g_gte_shader_flat.projectionLoc;
 		u_projection3DLoc = g_gte_shader_flat.projection3DLoc;
@@ -1629,6 +1646,9 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 	if (u_ditherForceLoc != -1)
 		glUniform1f(u_ditherForceLoc,
 		            (g_cfg_psxDither && !g_PsxDitherSuppressed) ? 1.0f : 0.0f);
+
+	if (u_perPrimDitherLoc != -1)
+		glUniform1f(u_perPrimDitherLoc, g_cfg_screenDither ? 1.0f : 0.0f);
 
 	/* Pixel scale = window width / PSX native (320). Scales the dither
 	 * cell so each PSX-pixel-equivalent on screen gets its own matrix

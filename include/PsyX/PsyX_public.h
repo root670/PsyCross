@@ -67,6 +67,7 @@ extern int							g_cfg_pgxpZBuffer;
 extern int							g_cfg_bilinearFiltering;
 extern int							g_cfg_affineTextures;
 extern int							g_cfg_psxDither;
+extern int							g_cfg_screenDither;
 extern int							g_cfg_pgxpTextureCorrection;
 
 /* PC port (Silent Hill): runtime master gate for PGXP perspective correction.
