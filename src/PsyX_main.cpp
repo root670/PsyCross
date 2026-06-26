@@ -224,11 +224,21 @@ int intrThreadMain(void* data)
 
 		PsyX_SPUAL_Update();
 
-#if defined(__SWITCH__)
-		svcSleepThread(200000LL);
+		{
+			const double timestep = g_vmode == MODE_NTSC ? FIXED_TIME_STEP_NTSC : FIXED_TIME_STEP_PAL;
+			const double remain   = timestep - Util_GetHPCTime(&g_vblTimer, 0);
+			if (remain > 0.006)
+			{
+#ifdef __SWITCH__
+				s64 ns = (s64)((remain - 0.005) * 1.0e9);
+				if (ns > 0) svcSleepThread(ns);
 #else
-		SDL_Delay(1);
+				int ms = (int)((remain - 0.005) * 1000.0);
+				if (ms > 0) SDL_Delay(ms);
 #endif
+			}
+			while (Util_GetHPCTime(&g_vblTimer, 0) < timestep) {}
+		}
 	}
 
 	return 0;
