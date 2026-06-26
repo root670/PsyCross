@@ -1187,8 +1187,19 @@ static void AddSplit(bool semiTrans, bool textured)
 	split.numVerts = 0;
 }
 
+/* Debug isolation of the additive (BM_ADD) layer, driven by the `add` console cmd.
+ * 0 = drop every additive split (confirm whether a fire/lightning effect is additive
+ * geometry), 1 = normal, 2 = draw additive WITH the depth test that GR_SetBlendMode
+ * normally disables (test the "additive draws through the floor" hypothesis). */
+int g_PsxDbgAddMode = 1;
+
 void DrawSplit(const GPUDrawSplit& split)
 {
+	const bool isAdditive = (split.blendMode == BM_ADD || split.blendMode == BM_ADD_QUATER_SOURCE);
+
+	if (g_PsxDbgAddMode == 0 && isAdditive)
+		return;
+
 	{
 		/* [WORLDSPLIT] Identify which render path the 3D WORLD uses. The old
 		 * cap of 40 only caught boot/title 2D prims (verts 6-18, dfe=1). World
@@ -1219,6 +1230,9 @@ void DrawSplit(const GPUDrawSplit& split)
 	GR_SetOffscreenState(&split.drawenv.clip, !drawOnScreen);
 
 	GR_SetBlendMode(split.blendMode);
+
+	if (g_PsxDbgAddMode == 2 && isAdditive)
+		GR_EnableDepth(1);
 
 	GR_DrawTriangles(split.startVertex, split.numVerts / 3);
 
