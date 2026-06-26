@@ -1062,12 +1062,15 @@ void PsyX_Sys_DoDebugKeys(int nKey, char down)
 				g_dbg_polygonSelected += (nKey == SDL_SCANCODE_UP) ? 3 : -3;
 			}
 			break;
+#endif
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 		case SDL_SCANCODE_F10:
+			/* PC port: moved out of #ifdef _DEBUG so the VRAM dump works in normal
+			 * (debug-enabled) builds too — it's the key diagnostic for the texture/
+			 * VRAM bugs (boss-FX ghost textures etc.). Writes VRAM.TGA to the cwd. */
 			eprintwarn("saving VRAM.TGA\n");
 			GR_SaveVRAM("VRAM.TGA", 0, 0, VRAM_WIDTH, VRAM_HEIGHT, 1);
 			break;
-#endif
-#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 		case SDL_SCANCODE_F12:
 			eprintwarn("Saving screenshot...\n");
 			PsyX_TakeScreenshot();
