@@ -39,7 +39,11 @@ target_include_directories(psycross_static PUBLIC "include" "include/psx")
 # -rdynamic cannot export hidden-visibility symbols, so compile just these
 # TUs hidden. They're still used normally within the module; nothing
 # external needs them (the maps link their own copy of this archive).
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
+    # ELF flat-namespace: hide libapi.c POSIX shims and SPUAL EFX names so
+    # they don't interpose libc / libopenal via -rdynamic. macOS two-level
+    # namespace makes interposition impossible, and map DLLs need these
+    # symbols exported from the main exe (see maps/CMakeLists.txt).
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/psx/libapi.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/audio/PsyX_SPUAL.cpp"

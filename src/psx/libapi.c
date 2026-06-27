@@ -913,7 +913,7 @@ int _card_format(int chan)
 
 /* ----- POSIX-style file ops on "buXX:NAME" paths ----- */
 
-int open(char* path, unsigned int flags)
+__attribute__((visibility("hidden"))) int open(char* path, unsigned int flags)
 {
 	if (!path) return -1;
 	int chan = 0;
@@ -952,7 +952,7 @@ int open(char* path, unsigned int flags)
 	return -1;
 }
 
-int close(int handle)
+__attribute__((visibility("hidden"))) int close(int handle)
 {
 	if (handle < 1 || handle >= (int)(sizeof(s_handles)/sizeof(s_handles[0]))) return -1;
 	if (!s_handles[handle].used) return -1;
@@ -960,7 +960,7 @@ int close(int handle)
 	return 0;
 }
 
-int lseek(int handle, int offset, int whence)
+__attribute__((visibility("hidden"))) int lseek(int handle, int offset, int whence)
 {
 	if (handle < 1 || handle >= (int)(sizeof(s_handles)/sizeof(s_handles[0]))) return -1;
 	if (!s_handles[handle].used) return -1;
@@ -974,7 +974,7 @@ int lseek(int handle, int offset, int whence)
 	return (int)p;
 }
 
-int read(int handle, void* buf, int bytes)
+__attribute__((visibility("hidden"))) int read(int handle, void* buf, int bytes)
 {
 	if (handle < 1 || handle >= (int)(sizeof(s_handles)/sizeof(s_handles[0]))) return -1;
 	if (!s_handles[handle].used) return -1;
@@ -988,7 +988,7 @@ int read(int handle, void* buf, int bytes)
 	return bytes;
 }
 
-int write(int handle, void* buf, int bytes)
+__attribute__((visibility("hidden"))) int write(int handle, void* buf, int bytes)
 {
 	if (handle < 1 || handle >= (int)(sizeof(s_handles)/sizeof(s_handles[0]))) return -1;
 	if (!s_handles[handle].used) return -1;
